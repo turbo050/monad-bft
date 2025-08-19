@@ -280,7 +280,7 @@ impl BlockTxnFeeStates {
 struct CommittedBlock {
     block_id: BlockId,
     round: Round,
-
+    seq_num: SeqNum,
     nonces: BlockAccountNonce,
     fees: BlockTxnFeeStates,
 }
@@ -326,25 +326,35 @@ where
         base_seq_num: &mut SeqNum,
         account_balance: &mut AccountBalanceState,
         eth_address: &Address,
-        execution_delay: SeqNum,
+        min_blocks_since_latest_txn: SeqNum,
         only_seqnum: bool,
     ) -> Result<(), BlockPolicyError> {
-        let next_seq_num = *base_seq_num;
-        let mut block_range = self.blocks.range(next_seq_num..);
+        let next_seq_num = *base_seq_num + SeqNum(1);
+        let mut start_seq_num = next_seq_num;
+        let mut block_range = self.blocks.range(start_seq_num..);
         if only_seqnum {
-            let start_seq_num = next_seq_num.max(execution_delay) - execution_delay;
+            // Compute offset as N - 2k + 2 where N is the proposed block and k is execution delay.
+            // Here min_blocks_since_latest_txn assumed execution_delay - 1
+            let offset = next_seq_num - min_blocks_since_latest_txn;
+            start_seq_num = (*base_seq_num).max(offset) - offset;
             block_range = self.blocks.range(start_seq_num..next_seq_num);
+            if start_seq_num > GENESIS_SEQ_NUM {
+                account_balance.block_seqnum_of_latest_txn = start_seq_num - SeqNum(1);
+            }
         }
+        debug!(
+            ?base_seq_num,
+            ?account_balance,
+            ?start_seq_num,
+            ?eth_address,
+            ?only_seqnum,
+            "before update_account_balance"
+        );
         for (&cache_seq_num, block) in block_range {
-            trace!(
-                ?cache_seq_num,
-                ?eth_address,
-                ?only_seqnum,
-                "update_account_balance"
-            );
+            assert!(block.seq_num == cache_seq_num);
             if let Some(block_txn_fees) = block.fees.get(eth_address) {
                 let mut validator =
-                    EthBlockPolicyBlockValidator::new(cache_seq_num, execution_delay)?;
+                    EthBlockPolicyBlockValidator::new(cache_seq_num, min_blocks_since_latest_txn)?;
 
                 validator.try_apply_block_fees(
                     account_balance,
@@ -355,13 +365,21 @@ where
             }
             *base_seq_num = cache_seq_num;
         }
-        *base_seq_num += SeqNum(1);
+
+        debug!(
+            ?base_seq_num,
+            ?account_balance,
+            ?eth_address,
+            ?only_seqnum,
+            "after update_account_balance"
+        );
 
         Ok(())
     }
 
     fn update_committed_block(&mut self, block: &EthValidatedBlock<ST, SCT>) {
         let block_number = block.get_seq_num();
+        debug!(?block_number, ?block.txn_fees, "update_committed_block");
         if let Some((&last_block_num, _)) = self.blocks.last_key_value() {
             assert_eq!(last_block_num + SeqNum(1), block_number);
         }
@@ -389,6 +407,7 @@ where
                 CommittedBlock {
                     block_id: block.get_id(),
                     round: block.get_block_round(),
+                    seq_num: block.get_seq_num(),
                     nonces: BlockAccountNonce {
                         nonces: block.get_account_nonces(),
                     },
@@ -468,6 +487,8 @@ where
 
                 account_balance.remaining_reserve_balance =
                     estimated_balance.min(account_balance.max_reserve_balance);
+                account_balance.balance = estimated_balance;
+                account_balance.block_seqnum_of_latest_txn = self.block_seq_num;
                 debug!(
                     "Block has emptying txn. updated balance: {:?} \
                         first txn value {:?} \
@@ -584,11 +605,12 @@ where
         } else {
             let txn_max_gas = compute_txn_max_gas_cost(txn);
             if account_balance.remaining_reserve_balance < txn_max_gas {
-                warn!(
+                debug!(
                     seq_num =?self.block_seq_num,
                     ?account_balance,
                     ?txn_max_gas,
-                    "Incoherent block with insufficient reserve balance"
+                    ?txn,
+                    "Txn can not be accepted insufficient reserve balance"
                 );
                 return Err(BlockPolicyError::BlockPolicyBlockValidatorError(
                     BlockPolicyBlockValidatorError::InsufficientReserveBalance,
@@ -626,9 +648,6 @@ where
     chain_id: u64,
 
     max_reserve_balance: Balance,
-
-    // Smallest number of blocks after the latest txn to allow transferring out of reserve balance
-    min_blocks_since_latest_txn: SeqNum,
 }
 
 impl<ST, SCT> EthBlockPolicy<ST, SCT>
@@ -649,7 +668,6 @@ where
             execution_delay: SeqNum(execution_delay),
             chain_id,
             max_reserve_balance: Balance::from(max_reserve_balance),
-            min_blocks_since_latest_txn: SeqNum(execution_delay),
         }
     }
 
@@ -776,12 +794,16 @@ where
     where
         SCT: SignatureCollection,
     {
-        trace!(?self.min_blocks_since_latest_txn, ?consensus_block_seq_num, "compute_account_base_balances");
-
         // calculation correct only if GENESIS_SEQ_NUM == 0
         assert_eq!(GENESIS_SEQ_NUM, SeqNum(0));
-        let base_seq_num = consensus_block_seq_num.max(self.execution_delay) - self.execution_delay;
+        let base_seq_num =
+            (consensus_block_seq_num).max(self.execution_delay) - self.execution_delay;
 
+        debug!(
+            ?base_seq_num,
+            ?consensus_block_seq_num,
+            "compute_account_base_balances"
+        );
         let addresses = addresses.unique().collect_vec();
         let account_balances = self
             .get_account_statuses(
@@ -813,12 +835,12 @@ where
                 .zip_eq(account_balances)
                 .map(|(address, mut balance_state)| {
                     // Apply Txn Fees for the txns from committed blocks
-                    let mut next_seq_num = base_seq_num + SeqNum(1);
+                    let mut next_seq_num = base_seq_num;
                     self.committed_cache.update_account_balance(
                         &mut next_seq_num,
                         &mut balance_state,
                         &address,
-                        self.execution_delay,
+                        self.min_blocks_since_latest_txn(),
                         true,
                     )?;
 
@@ -826,9 +848,11 @@ where
                         &mut next_seq_num,
                         &mut balance_state,
                         &address,
-                        self.execution_delay,
+                        self.min_blocks_since_latest_txn(),
                         false,
                     )?;
+
+                    next_seq_num += SeqNum(1);
 
                     // Apply Txn Fees for txns in extending blocks
                     if let Some(blocks) = extending_blocks {
@@ -837,13 +861,13 @@ where
                             .iter()
                             .skip_while(move |block| block.get_seq_num() < next_seq_num);
                         for extending_block in next_blocks {
-                            trace!(?next_seq_num, "looking for txn fees in extanding block");
+                            debug!(?next_seq_num, "looking for txn fees in extanding block");
                             assert_eq!(next_seq_num, extending_block.get_seq_num());
                             if let Some(txn_fee) = extending_block.txn_fees.get(&address) {
-                                trace!(?next_seq_num, ?address, "try_apply_block_fees");
+                                debug!(?next_seq_num, ?address, ?txn_fee, "try_apply_block_fees");
                                 let mut validator = EthBlockPolicyBlockValidator::new(
                                     next_seq_num,
-                                    self.execution_delay,
+                                    self.min_blocks_since_latest_txn(),
                                 )?;
 
                                 validator.try_apply_block_fees(
@@ -868,7 +892,7 @@ where
     }
 
     pub fn min_blocks_since_latest_txn(&self) -> SeqNum {
-        self.min_blocks_since_latest_txn
+        self.execution_delay - SeqNum(1)
     }
 
     pub fn max_reserve_balance(&self) -> Balance {
@@ -990,7 +1014,7 @@ where
 
         let mut validator = EthBlockPolicyBlockValidator::new(
             block.get_seq_num(),
-            self.min_blocks_since_latest_txn,
+            self.min_blocks_since_latest_txn(),
         )?;
 
         for txn in block.validated_txns.iter() {
@@ -1111,6 +1135,7 @@ mod test {
         let block1 = CommittedBlock {
             block_id: BlockId(Hash(Default::default())),
             round: Round(0),
+            seq_num: SeqNum(1),
             nonces: BlockAccountNonce {
                 nonces: BTreeMap::from([(address1, 1), (address2, 1)]),
             },
@@ -1139,6 +1164,7 @@ mod test {
         let block2 = CommittedBlock {
             block_id: BlockId(Hash(Default::default())),
             round: Round(0),
+            seq_num: SeqNum(2),
             nonces: BlockAccountNonce {
                 nonces: BTreeMap::from([(address1, 2), (address3, 1)]),
             },
@@ -1167,6 +1193,7 @@ mod test {
         let block3 = CommittedBlock {
             block_id: BlockId(Hash(Default::default())),
             round: Round(0),
+            seq_num: SeqNum(3),
             nonces: BlockAccountNonce {
                 nonces: BTreeMap::from([(address2, 2), (address3, 2)]),
             },
@@ -1194,7 +1221,8 @@ mod test {
 
         let block4 = CommittedBlock {
             block_id: BlockId(Hash(Default::default())),
-            round: Round(0),
+            round: Round(3),
+            seq_num: SeqNum(4),
             nonces: BlockAccountNonce {
                 nonces: BTreeMap::from([(address2, 3), (address3, 3)]),
             },

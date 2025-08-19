@@ -383,7 +383,7 @@ where
         let mut validator =
             EthBlockPolicyBlockValidator::new(proposed_seq_num, min_blocks_since_latest_txn)?;
 
-        tx_heap.drain_in_order_while(|sender, tx| {
+        tx_heap.drain_in_order_while(|_, tx| {
             if total_gas
                 .checked_add(tx.gas_limit())
                 .is_none_or(|new_total_gas| new_total_gas > proposal_gas_limit)

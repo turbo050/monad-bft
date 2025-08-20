@@ -148,7 +148,7 @@ where
         // recover the account nonces and txn fee for user txns
         let mut txn_fees: TxnFees = TxnFees::default();
 
-        for (i, eth_txn) in eth_txns.iter().enumerate() {
+        for eth_txn in eth_txns.iter() {
             if static_validate_transaction(
                 eth_txn,
                 self.chain_id,
@@ -176,19 +176,19 @@ where
                 }
             }
 
-            let txn_fee_entry = txn_fees.entry(eth_txn.signer()).or_insert(TxnFee {
-                first_txn_value: Balance::ZERO,
-                first_txn_gas: Balance::ZERO,
-                max_gas_cost: Balance::ZERO,
-            });
-            if i == 0 {
-                txn_fee_entry.first_txn_value = eth_txn.value();
-                txn_fee_entry.first_txn_gas = compute_txn_max_gas_cost(eth_txn);
-            } else {
-                txn_fee_entry.max_gas_cost = txn_fee_entry
-                    .max_gas_cost
-                    .saturating_add(compute_txn_max_gas_cost(eth_txn));
-            }
+            let txn_fee_entry = txn_fees
+                .entry(eth_txn.signer())
+                .and_modify(|e| {
+                    e.max_gas_cost = e
+                        .max_gas_cost
+                        .saturating_add(compute_txn_max_gas_cost(eth_txn));
+                })
+                .or_insert(TxnFee {
+                    first_txn_value: eth_txn.value(),
+                    first_txn_gas: compute_txn_max_gas_cost(eth_txn),
+                    max_gas_cost: Balance::ZERO,
+                });
+            debug!(?txn_fee_entry, address = ?eth_txn.signer(), "TxnFeeEntry");
         }
 
         let total_gas: u64 = eth_txns.iter().map(|tx| tx.gas_limit()).sum();

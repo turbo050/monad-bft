@@ -25,7 +25,7 @@ use monad_crypto::certificate_signature::{
 };
 use monad_eth_block_policy::{EthBlockPolicy, EthValidatedBlock};
 use monad_eth_txpool_types::{EthTxPoolDropReason, EthTxPoolInternalDropReason};
-use monad_eth_types::{Balance, EthExecutionProtocol};
+use monad_eth_types::{Balance, EthExecutionProtocol, BASE_FEE_PER_GAS};
 use monad_state_backend::{StateBackend, StateBackendError};
 use monad_types::{DropTimer, SeqNum};
 use monad_validator::signature_collection::SignatureCollection;
@@ -194,7 +194,7 @@ where
             return Ok(Vec::new());
         }
 
-        let tx_heap = TrackedTxHeap::new(&self.txs, &extending_blocks);
+        let tx_heap = TrackedTxHeap::new(&self.txs, &extending_blocks, BASE_FEE_PER_GAS);
         let tx_heap_len = tx_heap.len();
 
         let (account_balances, account_balance_lookups) = {

@@ -37,7 +37,6 @@ pub struct ValidEthTransaction {
     forward_last_seqnum: SeqNum,
     forward_retries: usize,
     max_value: Balance,
-    effective_tip_per_gas: u128,
 }
 
 impl ValidEthTransaction {
@@ -83,9 +82,6 @@ impl ValidEthTransaction {
         }
 
         let max_value = compute_txn_max_value(&tx);
-        let effective_tip_per_gas = tx
-            .effective_tip_per_gas(BASE_FEE_PER_GAS)
-            .unwrap_or_default();
 
         Some(Self {
             tx,
@@ -93,7 +89,6 @@ impl ValidEthTransaction {
             forward_last_seqnum: last_commit.seq_num,
             forward_retries: 0,
             max_value,
-            effective_tip_per_gas,
         })
     }
 
@@ -124,6 +119,10 @@ impl ValidEthTransaction {
 
     pub fn nonce(&self) -> Nonce {
         self.tx.nonce()
+    }
+
+    pub fn max_fee_per_gas(&self) -> u128 {
+        self.tx.max_fee_per_gas()
     }
 
     pub fn hash(&self) -> TxHash {

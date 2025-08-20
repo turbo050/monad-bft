@@ -231,7 +231,7 @@ where
             proposal_byte_limit,
             tx_heap,
             proposed_seq_num,
-            block_policy.min_blocks_since_latest_txn(),
+            block_policy.execution_delay,
             account_balances,
         )?;
 
@@ -370,7 +370,7 @@ where
         proposal_byte_limit: u64,
         tx_heap: TrackedTxHeap<'_>,
         proposed_seq_num: SeqNum,
-        min_blocks_since_latest_txn: SeqNum,
+        execution_delay: SeqNum,
         account_balances: BTreeMap<Address, AccountBalanceState>,
     ) -> Result<(u64, Vec<Recovered<TxEnvelope>>), BlockPolicyError> {
         assert!(tx_limit > 0);
@@ -380,8 +380,7 @@ where
         let mut total_size = 0u64;
 
         let mut balances = account_balances;
-        let mut validator =
-            EthBlockPolicyBlockValidator::new(proposed_seq_num, min_blocks_since_latest_txn)?;
+        let mut validator = EthBlockPolicyBlockValidator::new(proposed_seq_num, execution_delay)?;
 
         tx_heap.drain_in_order_while(|_, tx| {
             if total_gas

@@ -217,17 +217,13 @@ where
 {
     type Transaction;
 
-    fn new(
-        block_seq_num: SeqNum,
-        min_blocks_since_latest_txn: SeqNum,
-    ) -> Result<Self, BlockPolicyError>;
+    fn new(block_seq_num: SeqNum, execution_delay: SeqNum) -> Result<Self, BlockPolicyError>;
 
     fn try_apply_block_fees(
         &mut self,
         account_balance: &mut AccountBalanceState,
         fees: &TxnFee,
         eth_address: &Address,
-        only_seqnum: bool,
     ) -> Result<(), BlockPolicyError>;
 
     fn try_add_transaction(

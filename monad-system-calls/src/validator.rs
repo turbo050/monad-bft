@@ -29,14 +29,12 @@ use monad_consensus_types::block::ConsensusBlockHeader;
 use monad_crypto::certificate_signature::{
     CertificateSignaturePubKey, CertificateSignatureRecoverable,
 };
-use monad_eth_types::EthExecutionProtocol;
+use monad_eth_types::{EthExecutionProtocol, ExtractEthAddress};
 use monad_types::{Epoch, SeqNum};
 use monad_validator::signature_collection::SignatureCollection;
 use tracing::debug;
 
-use crate::{
-    SYSTEM_SENDER_ETH_ADDRESS, SystemCall, SystemTransaction, generate_system_calls_from_header,
-};
+use crate::{SYSTEM_SENDER_ETH_ADDRESS, SystemCall, SystemTransaction, generate_system_calls};
 
 #[derive(Debug)]
 pub enum SystemTransactionError {
@@ -136,15 +134,20 @@ impl SystemTransactionValidator {
         SystemTransactionValidationError,
     >
     where
+        CertificateSignaturePubKey<ST>: ExtractEthAddress,
         ST: CertificateSignatureRecoverable,
         SCT: SignatureCollection<NodeIdPubKey = CertificateSignaturePubKey<ST>>,
     {
         let mut validated_sys_txns = Vec::new();
 
-        let expected_sys_calls = generate_system_calls_from_header(
+        let address = block_header.author.pubkey().get_eth_address();
+        let expected_sys_calls = generate_system_calls(
             self.epoch_length,
             self.staking_activation,
-            block_header,
+            block_header.seq_num,
+            block_header.epoch,
+            block_header.qc.get_epoch(),
+            address,
         );
         let mut curr_sys_sender_nonce = None;
         for expected_sys_call in expected_sys_calls {

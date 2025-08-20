@@ -943,8 +943,8 @@ where
                     .collect::<Vec<_>>();
 
                 if take_checkpoint {
-                    if let Some(checkpoint) = ConsensusChildState::new(self).checkpoint() {
-                        cmds.push(Command::CheckpointCommand(checkpoint));
+                    if let Some(checkpoint_cmd) = ConsensusChildState::new(self).checkpoint() {
+                        cmds.push(Command::ConfigFileCommand(checkpoint_cmd));
                     }
                 }
 

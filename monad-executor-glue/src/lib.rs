@@ -185,14 +185,19 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct CheckpointCommand<ST, SCT, EPT>
+pub enum ConfigFileCommand<ST, SCT, EPT>
 where
     ST: CertificateSignatureRecoverable,
     SCT: SignatureCollection<NodeIdPubKey = CertificateSignaturePubKey<ST>>,
     EPT: ExecutionProtocol,
 {
-    pub root_seq_num: SeqNum,
-    pub checkpoint: Checkpoint<ST, SCT, EPT>,
+    Checkpoint {
+        root_seq_num: SeqNum,
+        checkpoint: Checkpoint<ST, SCT, EPT>,
+    },
+    ValidatorSetData {
+        validator_set_data: ValidatorSetDataWithEpoch<SCT>,
+    },
 }
 
 #[derive(Debug)]
@@ -561,7 +566,7 @@ where
     RouterCommand(RouterCommand<ST, OM>),
     TimerCommand(TimerCommand<E>),
     LedgerCommand(LedgerCommand<ST, SCT, EPT>),
-    CheckpointCommand(CheckpointCommand<ST, SCT, EPT>),
+    ConfigFileCommand(ConfigFileCommand<ST, SCT, EPT>),
     ValSetCommand(ValSetCommand),
     TimestampCommand(TimestampCommand),
 
@@ -585,8 +590,8 @@ where
             Self::RouterCommand(arg0) => f.debug_tuple("RouterCommand").field(arg0).finish(),
             Self::TimerCommand(arg0) => f.debug_tuple("TimerCommand").field(arg0).finish(),
             Self::LedgerCommand(arg0) => f.debug_tuple("LedgerCommand").field(arg0).finish(),
-            Self::CheckpointCommand(arg0) => {
-                f.debug_tuple("CheckpointCommand").field(arg0).finish()
+            Self::ConfigFileCommand(arg0) => {
+                f.debug_tuple("ConfigFileCommand").field(arg0).finish()
             }
             Self::ValSetCommand(arg0) => f.debug_tuple("ValSetCommand").field(arg0).finish(),
             Self::TimestampCommand(arg0) => f.debug_tuple("TimestampCommand").field(arg0).finish(),
@@ -617,7 +622,7 @@ where
         Vec<RouterCommand<ST, OM>>,
         Vec<TimerCommand<E>>,
         Vec<LedgerCommand<ST, SCT, EPT>>,
-        Vec<CheckpointCommand<ST, SCT, EPT>>,
+        Vec<ConfigFileCommand<ST, SCT, EPT>>,
         Vec<ValSetCommand>,
         Vec<TimestampCommand>,
         Vec<TxPoolCommand<ST, SCT, EPT, BPT, SBT>>,
@@ -629,7 +634,7 @@ where
         let mut router_cmds = Vec::new();
         let mut timer_cmds = Vec::new();
         let mut ledger_cmds = Vec::new();
-        let mut checkpoint_cmds = Vec::new();
+        let mut config_file_cmds = Vec::new();
         let mut val_set_cmds = Vec::new();
         let mut timestamp_cmds = Vec::new();
         let mut txpool_cmds = Vec::new();
@@ -643,7 +648,7 @@ where
                 Command::RouterCommand(cmd) => router_cmds.push(cmd),
                 Command::TimerCommand(cmd) => timer_cmds.push(cmd),
                 Command::LedgerCommand(cmd) => ledger_cmds.push(cmd),
-                Command::CheckpointCommand(cmd) => checkpoint_cmds.push(cmd),
+                Command::ConfigFileCommand(cmd) => config_file_cmds.push(cmd),
                 Command::ValSetCommand(cmd) => val_set_cmds.push(cmd),
                 Command::TimestampCommand(cmd) => timestamp_cmds.push(cmd),
                 Command::TxPoolCommand(cmd) => txpool_cmds.push(cmd),
@@ -658,7 +663,7 @@ where
             router_cmds,
             timer_cmds,
             ledger_cmds,
-            checkpoint_cmds,
+            config_file_cmds,
             val_set_cmds,
             timestamp_cmds,
             txpool_cmds,

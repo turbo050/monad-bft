@@ -26,13 +26,7 @@ use alloy_primitives::{Address, B256, hex};
 use alloy_rlp::Encodable;
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
-use monad_consensus_types::block::ConsensusBlockHeader;
-use monad_crypto::certificate_signature::{
-    CertificateSignaturePubKey, CertificateSignatureRecoverable, PubKey,
-};
-use monad_eth_types::EthExecutionProtocol;
 use monad_types::{Epoch, SeqNum};
-use monad_validator::signature_collection::SignatureCollection;
 use staking_contract::{StakingContractCall, StakingContractTransaction};
 use validator::SystemTransactionError;
 
@@ -70,7 +64,7 @@ impl SystemCall {
         sys_txn: Recovered<TxEnvelope>,
     ) -> Result<SystemTransaction, SystemTransactionError> {
         match self {
-            Self::StakingContractCall(staking_call) => staking_call
+            Self::StakingContractCall(staking_sys_call) => staking_sys_call
                 .validate_system_transaction_input(sys_txn)
                 .map(SystemTransaction::StakingContractTransaction),
         }
@@ -78,9 +72,9 @@ impl SystemCall {
 
     fn into_signed_transaction(self, chain_id: u64, nonce: u64) -> SystemTransaction {
         match self {
-            Self::StakingContractCall(staking_call) => {
+            Self::StakingContractCall(staking_sys_call) => {
                 SystemTransaction::StakingContractTransaction(
-                    staking_call.into_signed_transaction(chain_id, nonce),
+                    staking_sys_call.into_signed_transaction(chain_id, nonce),
                 )
             }
         }
@@ -163,32 +157,6 @@ fn generate_system_calls(
     }
 
     system_calls
-}
-
-// Used by a validator to generate expected system calls for a block
-fn generate_system_calls_from_header<ST, SCT>(
-    epoch_length: SeqNum,
-    staking_activation: Epoch,
-    block_header: &ConsensusBlockHeader<ST, SCT, EthExecutionProtocol>,
-) -> Vec<SystemCall>
-where
-    ST: CertificateSignatureRecoverable,
-    SCT: SignatureCollection<NodeIdPubKey = CertificateSignaturePubKey<ST>>,
-{
-    let author_eth_address = block_header
-        .author
-        .pubkey()
-        .get_eth_address()
-        .expect("eth address available for signing key");
-
-    generate_system_calls(
-        epoch_length,
-        staking_activation,
-        block_header.seq_num,
-        block_header.epoch,
-        block_header.qc.get_epoch(),
-        author_eth_address,
-    )
 }
 
 #[derive(Clone, Debug)]

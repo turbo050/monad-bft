@@ -69,7 +69,7 @@ use monad_triedb_cache::StateBackendCache;
 use monad_triedb_utils::TriedbReader;
 use monad_types::{DropTimer, Epoch, NodeId, Round, SeqNum, GENESIS_SEQ_NUM};
 use monad_updaters::{
-    checkpoint::FileCheckpoint, config_loader::ConfigLoader, loopback::LoopbackExecutor,
+    config_file::ConfigFile, config_loader::ConfigLoader, loopback::LoopbackExecutor,
     parent::ParentExecutor, timer::TokioTimer, tokio_timestamp::TokioTimestamp,
     triedb_val_set::ValSetUpdater,
 };
@@ -306,9 +306,12 @@ async fn run(node_state: NodeState, reload_handle: Box<dyn TracingReload>) -> Re
         router,
         timer: TokioTimer::default(),
         ledger: MonadBlockFileLedger::new(node_state.ledger_path),
-        checkpoint: FileCheckpoint::new(node_state.forkpoint_path),
+        config_file: ConfigFile::new(
+            node_state.forkpoint_path,
+            node_state.validators_path.clone(),
+        ),
         val_set: ValSetUpdater::new(
-            &node_state.validators_path,
+            node_state.validators_path,
             node_state.chain_config.get_epoch_length(),
             node_state.chain_config.get_staking_activation(),
             state_backend.clone(),

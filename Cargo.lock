@@ -4841,7 +4841,6 @@ dependencies = [
 name = "monad-bls"
 version = "0.1.0"
 dependencies = [
- "alloy-primitives",
  "alloy-rlp",
  "bitvec",
  "blst",
@@ -4959,7 +4958,6 @@ dependencies = [
 name = "monad-crypto"
 version = "0.1.0"
 dependencies = [
- "alloy-primitives",
  "alloy-rlp",
  "blake3",
  "criterion",
@@ -5251,6 +5249,8 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
+ "monad-crypto",
+ "monad-secp",
  "monad-types",
  "serde",
 ]

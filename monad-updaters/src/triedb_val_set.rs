@@ -16,7 +16,7 @@
 use std::{
     marker::PhantomData,
     ops::DerefMut,
-    path::{Path, PathBuf},
+    path::PathBuf,
     pin::Pin,
     sync::mpsc::Sender,
     task::{Context, Poll},
@@ -66,7 +66,7 @@ where
 
 impl ValSetUpdater<SecpSignature, BlsSignatureCollection<PubKey>> {
     pub fn new<SBT>(
-        validators_path: &Path,
+        validators_path: PathBuf,
         epoch_length: SeqNum,
         staking_activation: Epoch,
         state_backend: SBT,
@@ -112,7 +112,7 @@ impl ValSetUpdater<SecpSignature, BlsSignatureCollection<PubKey>> {
         });
 
         Self {
-            validators_path: validators_path.to_owned(),
+            validators_path,
 
             epoch_length,
             staking_activation,

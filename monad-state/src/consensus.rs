@@ -38,7 +38,7 @@ use monad_crypto::certificate_signature::{
     CertificateSignaturePubKey, CertificateSignatureRecoverable,
 };
 use monad_executor_glue::{
-    BlockSyncEvent, CheckpointCommand, Command, ConsensusEvent, LedgerCommand, LoopbackCommand,
+    BlockSyncEvent, Command, ConfigFileCommand, ConsensusEvent, LedgerCommand, LoopbackCommand,
     MempoolEvent, MonadEvent, RouterCommand, StateSyncEvent, TimeoutVariant, TimerCommand,
     TimestampCommand, TxPoolCommand, ValSetCommand,
 };
@@ -451,7 +451,7 @@ where
             .collect_vec()
     }
 
-    pub(super) fn checkpoint(&mut self) -> Option<CheckpointCommand<ST, SCT, EPT>> {
+    pub(super) fn checkpoint(&mut self) -> Option<ConfigFileCommand<ST, SCT, EPT>> {
         let ConsensusMode::Live(consensus) = self.consensus else {
             return None;
         };
@@ -477,7 +477,7 @@ where
             cert_keypair: self.cert_keypair,
         };
         let checkpoint = consensus.checkpoint();
-        Some(CheckpointCommand {
+        Some(ConfigFileCommand::Checkpoint {
             root_seq_num: consensus.consensus.blocktree().root().seq_num,
             checkpoint,
         })

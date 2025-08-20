@@ -38,7 +38,7 @@ use monad_crypto::certificate_signature::{
 use monad_eth_block_policy::EthBlockPolicy;
 use monad_eth_txpool::{EthTxPool, EthTxPoolEventTracker};
 use monad_eth_txpool_types::{EthTxPoolDropReason, EthTxPoolEvent};
-use monad_eth_types::EthExecutionProtocol;
+use monad_eth_types::{EthExecutionProtocol, ExtractEthAddress};
 use monad_executor::{Executor, ExecutorMetrics, ExecutorMetricsChain};
 use monad_executor_glue::{MempoolEvent, MonadEvent, TxPoolCommand};
 use monad_secp::RecoverableAddress;
@@ -100,6 +100,7 @@ where
     ST: CertificateSignatureRecoverable,
     SCT: SignatureCollection<NodeIdPubKey = CertificateSignaturePubKey<ST>>,
     SBT: StateBackend<ST, SCT> + Send + 'static,
+    CertificateSignaturePubKey<ST>: ExtractEthAddress,
     CCT: ChainConfig<CRT> + Send + 'static,
     CRT: ChainRevision + Send + 'static,
     Self: Unpin,
@@ -215,6 +216,7 @@ where
     ST: CertificateSignatureRecoverable,
     SCT: SignatureCollection<NodeIdPubKey = CertificateSignaturePubKey<ST>>,
     SBT: StateBackend<ST, SCT>,
+    CertificateSignaturePubKey<ST>: ExtractEthAddress,
     CCT: ChainConfig<CRT>,
     CRT: ChainRevision,
 {
@@ -440,6 +442,7 @@ where
     ST: CertificateSignatureRecoverable,
     SCT: SignatureCollection<NodeIdPubKey = CertificateSignaturePubKey<ST>>,
     SBT: StateBackend<ST, SCT>,
+    CertificateSignaturePubKey<ST>: ExtractEthAddress,
     CCT: ChainConfig<CRT>,
     CRT: ChainRevision,
 

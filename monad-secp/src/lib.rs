@@ -16,7 +16,6 @@
 mod recoverable_address;
 mod secp;
 
-use alloy_primitives::Address;
 use alloy_rlp::{Decodable, Encodable};
 use monad_crypto::{
     certificate_signature::{
@@ -55,10 +54,6 @@ impl certificate_signature::PubKey for PubKey {
 
     fn bytes(&self) -> Vec<u8> {
         Self::bytes_compressed(self).to_vec()
-    }
-
-    fn get_eth_address(&self) -> Option<Address> {
-        Some(Address::from_raw_public_key(&Self::bytes(self)[1..]))
     }
 }
 

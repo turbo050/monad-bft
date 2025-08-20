@@ -19,7 +19,6 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use alloy_primitives::Address;
 use alloy_rlp::{Decodable, Encodable};
 
 use crate::{signing_domain::SigningDomain, NopKeyPair, NopPubKey, NopSignature};
@@ -42,9 +41,6 @@ pub trait PubKey:
     type Error: Display + Debug + Send + Sync;
     fn from_bytes(pubkey: &[u8]) -> Result<Self, Self::Error>;
     fn bytes(&self) -> Vec<u8>;
-
-    // FIXME this is required to get Address from NodeId
-    fn get_eth_address(&self) -> Option<Address>;
 }
 
 pub trait CertificateKeyPair: Send + Sized + Sync + 'static {
@@ -96,10 +92,6 @@ impl PubKey for NopPubKey {
 
     fn bytes(&self) -> Vec<u8> {
         self.0.to_vec()
-    }
-
-    fn get_eth_address(&self) -> Option<Address> {
-        Some(Address::new([0_u8; 20]))
     }
 }
 

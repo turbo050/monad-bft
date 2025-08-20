@@ -38,7 +38,8 @@ use monad_eth_block_policy::{
     compute_txn_max_value, static_validate_transaction, EthBlockPolicy, EthValidatedBlock,
 };
 use monad_eth_types::{
-    EthBlockBody, EthExecutionProtocol, Nonce, ProposedEthHeader, BASE_FEE_PER_GAS,
+    EthBlockBody, EthExecutionProtocol, ExtractEthAddress, Nonce, ProposedEthHeader,
+    BASE_FEE_PER_GAS,
 };
 use monad_secp::RecoverableAddress;
 use monad_state_backend::StateBackend;
@@ -74,6 +75,7 @@ where
     ST: CertificateSignatureRecoverable,
     SCT: SignatureCollection<NodeIdPubKey = CertificateSignaturePubKey<ST>>,
     SBT: StateBackend<ST, SCT>,
+    CertificateSignaturePubKey<ST>: ExtractEthAddress,
 {
     pub fn new(chain_id: u64, epoch_length: SeqNum, staking_activation: Epoch) -> Self {
         Self {
@@ -301,6 +303,7 @@ where
     ST: CertificateSignatureRecoverable,
     SCT: SignatureCollection<NodeIdPubKey = CertificateSignaturePubKey<ST>>,
     SBT: StateBackend<ST, SCT>,
+    CertificateSignaturePubKey<ST>: ExtractEthAddress,
 {
     #[tracing::instrument(
         level = "debug", 

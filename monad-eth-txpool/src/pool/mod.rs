@@ -25,11 +25,13 @@ use monad_consensus_types::{
     block::ProposedExecutionInputs, payload::RoundSignature, quorum_certificate::QuorumCertificate,
 };
 use monad_crypto::certificate_signature::{
-    CertificateSignaturePubKey, CertificateSignatureRecoverable, PubKey,
+    CertificateSignaturePubKey, CertificateSignatureRecoverable,
 };
 use monad_eth_block_policy::{EthBlockPolicy, EthValidatedBlock};
 use monad_eth_txpool_types::{EthTxPoolDropReason, EthTxPoolInternalDropReason, EthTxPoolSnapshot};
-use monad_eth_types::{EthBlockBody, EthExecutionProtocol, ProposedEthHeader, BASE_FEE_PER_GAS};
+use monad_eth_types::{
+    EthBlockBody, EthExecutionProtocol, ExtractEthAddress, ProposedEthHeader, BASE_FEE_PER_GAS,
+};
 use monad_state_backend::{StateBackend, StateBackendError};
 use monad_system_calls::{SystemTransactionGenerator, SYSTEM_SENDER_ETH_ADDRESS};
 use monad_types::{Epoch, NodeId, SeqNum};
@@ -75,6 +77,7 @@ where
     ST: CertificateSignatureRecoverable,
     SCT: SignatureCollection<NodeIdPubKey = CertificateSignaturePubKey<ST>>,
     SBT: StateBackend<ST, SCT>,
+    CertificateSignaturePubKey<ST>: ExtractEthAddress,
 {
     pub fn new(
         do_local_insert: bool,
@@ -271,10 +274,7 @@ where
         // u64::MAX seconds is ~500 Billion years
         assert!(timestamp_seconds < u64::MAX.into());
 
-        let self_eth_address = node_id
-            .pubkey()
-            .get_eth_address()
-            .expect("eth address available for signing key");
+        let self_eth_address = node_id.pubkey().get_eth_address();
         let system_transactions = self.get_system_transactions(
             proposed_seq_num,
             epoch,

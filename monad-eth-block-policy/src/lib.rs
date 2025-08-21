@@ -1207,6 +1207,154 @@ mod test {
         };
         let result = setup_block_policy_with_txs(txs, vec![signer], &state_backend);
         assert!(result.is_err(), "Block coherency check should have failed: {:?}", result);
+
+
+        ////////////////////////////////////////////////////////////////////////////////////
+        /// Case2: Emptying transaction + another transaction in same block              ///
+        ////////////////////////////////////////////////////////////////////////////////////
+
+        // first tx dips into reserve balance, second tx has gas cost less than remaining reserve balance
+        let tx1 = make_test_tx(50000, ONE_ETHER, 0, S1);
+        let tx2 = make_test_tx(50000, HALF_ETHER, 1, S1);
+        let txs = BTreeMap::from([(4, vec![tx1, tx2])]); // txs in block n
+
+        // balance of signer at block n-3
+        let state_backend = NopStateBackend {
+            balances: BTreeMap::from([(signer, U256::from(ONE_ETHER + HALF_ETHER))]),
+            ..Default::default()
+        };
+
+        let result = setup_block_policy_with_txs(txs.clone(), vec![signer], &state_backend);
+        assert!(result.is_ok(), "Block coherency check failed: {:?}", result);
+
+        // first tx dips into reserve balance, second tx has gas cost more than remaining reserve balance
+        let tx1 = make_test_tx(50000, ONE_ETHER, 0, S1);
+        let tx2 = make_test_tx(50000, HALF_ETHER, 1, S1);
+        let txs = BTreeMap::from([(4, vec![tx1, tx2])]); // txs in block n
+
+        // balance of signer at block n-3
+        let gas_cost = 50000 * BASE_FEE_PER_GAS as u128;
+        let balance = ONE_ETHER + (2 * gas_cost) - 1; 
+        let state_backend = NopStateBackend {
+            balances: BTreeMap::from([(signer, U256::from(balance))]),
+            ..Default::default()
+        };
+
+        let result = setup_block_policy_with_txs(txs.clone(), vec![signer], &state_backend);
+        assert!(result.is_err(), "Block coherency check should have failed: {:?}", result);
+
+        // first tx doesn't dip into reserve balance, second tx has max reserve balance to spend from
+        let tx1 = make_test_tx(50000, 0, 0, S1);
+        let tx2 = make_test_tx(20_000_000, HALF_ETHER, 1, S1);
+        let txs = BTreeMap::from([(4, vec![tx1, tx2.clone()])]); // txs in block n
+
+        // balance of signer at block n-3
+        assert_eq!(tx2.gas_limit() as u128 * BASE_FEE_PER_GAS as u128, RESERVE_BALANCE);
+        let first_tx_gas_cost = 50000 * BASE_FEE_PER_GAS as u128;
+        let second_tx_gas_cost = RESERVE_BALANCE;
+        let balance = first_tx_gas_cost + second_tx_gas_cost;
+        let state_backend = NopStateBackend {
+            balances: BTreeMap::from([(signer, U256::from(balance))]),
+            ..Default::default()
+        };
+
+        let result = setup_block_policy_with_txs(txs.clone(), vec![signer], &state_backend);
+        assert!(result.is_ok(), "Block coherency check failed: {:?}", result);
+
+
+        ////////////////////////////////////////////////////////////////////////////////////
+        /// Case3: Emptying transaction + another transaction in different block         ///
+        ////////////////////////////////////////////////////////////////////////////////////
+        
+        // first tx dips into reserve balance, second tx has gas cost less than remaining reserve balance
+        let tx1 = make_test_tx(50000, ONE_ETHER, 0, S1);
+        let tx2 = make_test_tx(50000, HALF_ETHER, 1, S1);
+        // first tx in block n-2, second tx in block n
+        let txs = BTreeMap::from([(2, vec![tx1]), (4, vec![tx2])]);
+
+        // balance of signer at block n-3
+        let state_backend = NopStateBackend {
+            balances: BTreeMap::from([(signer, U256::from(ONE_ETHER + HALF_ETHER))]),
+            ..Default::default()
+        };
+
+        let result = setup_block_policy_with_txs(txs.clone(), vec![signer], &state_backend);
+        assert!(result.is_ok(), "Block coherency check failed: {:?}", result);
+
+        // first tx dips into reserve balance, second tx has gas cost more than remaining reserve balance
+        let tx1 = make_test_tx(50000, ONE_ETHER, 0, S1);
+        let tx2 = make_test_tx(50000, HALF_ETHER, 1, S1);
+        // first tx in block n-2, second tx in block n
+        let txs = BTreeMap::from([(2, vec![tx1]), (4, vec![tx2])]);
+
+        // balance of signer at block n-3
+        let gas_cost = 50000 * BASE_FEE_PER_GAS as u128;
+        let balance = ONE_ETHER + (2 * gas_cost) - 1; 
+        let state_backend = NopStateBackend {
+            balances: BTreeMap::from([(signer, U256::from(balance))]),
+            ..Default::default()
+        };
+
+        let result = setup_block_policy_with_txs(txs.clone(), vec![signer], &state_backend);
+        assert!(result.is_err(), "Block coherency check should have failed: {:?}", result);
+
+        // first tx doesn't dip into reserve balance, second tx has max reserve balance to spend from
+        let tx1 = make_test_tx(50000, 0, 0, S1);
+        let tx2 = make_test_tx(20_000_000, HALF_ETHER, 1, S1);
+        // first tx in block n-2, second tx in block n
+        let txs = BTreeMap::from([(2, vec![tx1]), (4, vec![tx2.clone()])]);
+
+        // balance of signer at block n-3
+        assert_eq!(tx2.gas_limit() as u128 * BASE_FEE_PER_GAS as u128, RESERVE_BALANCE);
+        let first_tx_gas_cost = 50000 * BASE_FEE_PER_GAS as u128;
+        let second_tx_gas_cost = RESERVE_BALANCE;
+        let balance = first_tx_gas_cost + second_tx_gas_cost;
+        let state_backend = NopStateBackend {
+            balances: BTreeMap::from([(signer, U256::from(balance))]),
+            ..Default::default()
+        };
+
+        let result = setup_block_policy_with_txs(txs.clone(), vec![signer], &state_backend);
+        assert!(result.is_ok(), "Block coherency check failed: {:?}", result);
+        
+
+        ////////////////////////////////////////////////////////////////////////////////////
+        /// Case4: Non-emptying transaction + another transaction in different block     ///
+        ////////////////////////////////////////////////////////////////////////////////////
+        
+        // only gas cost of transactions are taken into account, txn value is not included when calculating reserve balance
+        let tx1 = make_test_tx(50000, ONE_ETHER, 0, S1);
+        let tx2 = make_test_tx(50000, HALF_ETHER, 1, S1);
+        let tx3 = make_test_tx(50000, HALF_ETHER, 2, S1);
+        // first tx in block n-3, second tx in block n-2, third tx in block n
+        let txs = BTreeMap::from([(1, vec![tx1]), (2, vec![tx2]), (4, vec![tx3])]);
+
+        // balance of signer at block n-3
+        let gas_cost = 50000 * 2 * BASE_FEE_PER_GAS as u128;
+        let state_backend = NopStateBackend {
+            balances: BTreeMap::from([(signer, U256::from(gas_cost))]),
+            ..Default::default()
+        };
+
+        let result = setup_block_policy_with_txs(txs.clone(), vec![signer], &state_backend);
+        assert!(result.is_ok(), "Block coherency check failed: {:?}", result);
+
+        // transactions exceed reserve balance
+        let tx1 = make_test_tx(50000, ONE_ETHER, 0, S1);
+        let tx2 = make_test_tx(50000, HALF_ETHER, 1, S1);
+        let tx3 = make_test_tx(50001, HALF_ETHER, 2, S1);
+        // first tx in block n-3, second tx in block n-2, third tx in block n
+        let txs = BTreeMap::from([(1, vec![tx1]), (2, vec![tx2]), (4, vec![tx3])]);
+
+        // balance of signer at block n-3
+        let gas_cost = 50000 * 2 * BASE_FEE_PER_GAS as u128;
+        let state_backend = NopStateBackend {
+            balances: BTreeMap::from([(signer, U256::from(gas_cost))]),
+            ..Default::default()
+        };
+
+        let result = setup_block_policy_with_txs(txs.clone(), vec![signer], &state_backend);
+        assert!(result.is_err(), "Block coherency check should have failed: {:?}", result);
     }
 
     #[test]

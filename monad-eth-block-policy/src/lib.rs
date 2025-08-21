@@ -508,6 +508,7 @@ where
             block_gas_cost = block_txn_fees
                 .max_gas_cost
                 .saturating_add(block_txn_fees.first_txn_gas);
+            account_balance.block_seqnum_of_latest_txn = self.block_seq_num;
         }
 
         if account_balance.remaining_reserve_balance < block_gas_cost {

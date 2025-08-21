@@ -5139,6 +5139,7 @@ dependencies = [
  "monad-secp",
  "monad-testutil",
  "monad-types",
+ "monad-validator",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry-semantic-conventions",

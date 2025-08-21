@@ -288,7 +288,7 @@ struct CommittedBlock {
 #[derive(Debug)]
 struct CommittedBlkBuffer<ST, SCT> {
     blocks: SortedVectorMap<SeqNum, CommittedBlock>,
-    min_buffer_size: usize, // should be execution delay
+    min_buffer_size: usize, // should be 2 * execution delay
 
     _phantom: PhantomData<(ST, SCT)>,
 }
@@ -328,17 +328,15 @@ where
         eth_address: &Address,
         execution_delay: SeqNum,
     ) -> Result<(), BlockPolicyError> {
-        let next_seq_num = *base_seq_num + SeqNum(1);
-
         // base_seq_num = N - k, where N is the proposed block and k is execution delay.
         // transactions inclusion starting block = N - k + 1
         // check for emptying txn starting block = N - 2k + 2
-        let txn_inclusion_start = next_seq_num;
+        let txn_inclusion_start = *base_seq_num + SeqNum(1);
         let emptying_txn_check_start =
             (txn_inclusion_start + SeqNum(1)).max(execution_delay) - execution_delay;
 
         let emptying_txn_check_block_range =
-            self.blocks.range(emptying_txn_check_start..next_seq_num);
+            self.blocks.range(emptying_txn_check_start..txn_inclusion_start);
         let block_range = self.blocks.range(txn_inclusion_start..);
 
         if emptying_txn_check_start > GENESIS_SEQ_NUM {
@@ -545,7 +543,7 @@ where
 
         let maybe_account_balance = account_balances.get_mut(&eth_address);
 
-        if maybe_account_balance.is_none() {
+        let Some(account_balance) = maybe_account_balance else {
             warn!(
                 seq_num =?self.block_seq_num,
                 ?eth_address,
@@ -554,9 +552,7 @@ where
             return Err(BlockPolicyError::BlockPolicyBlockValidatorError(
                 BlockPolicyBlockValidatorError::AccountBalanceMissing,
             ));
-        }
-
-        let account_balance = maybe_account_balance.unwrap();
+        };
 
         // txn T is emptying if there is no "prior txn" i.e. a txn from the same sender sent from block P so that P >= block_number(T) - k + 1.
         let blocks_since_latest_txn = self
@@ -1066,11 +1062,12 @@ mod test {
 
     use alloy_consensus::{SignableTransaction, TxEip1559, TxLegacy};
     use alloy_primitives::{hex, Address, Bytes, FixedBytes, PrimitiveSignature, TxKind, B256};
-    use alloy_signer::SignerSync;
+    use alloy_signer::{k256::elliptic_curve::rand_core::block, SignerSync};
     use alloy_signer_local::PrivateKeySigner;
     use monad_crypto::NopSignature;
-    use monad_eth_testutil::{make_eip1559_tx_with_value, make_legacy_tx, recover_tx};
+    use monad_eth_testutil::{generate_consensus_test_block, make_eip1559_tx_with_value, recover_tx};
     use monad_eth_types::BASE_FEE_PER_GAS;
+    use monad_state_backend::NopStateBackend;
     use monad_testutil::signing::MockSignatures;
     use monad_types::{Hash, SeqNum};
     use proptest::{prelude::*, strategy::Just};
@@ -1080,12 +1077,15 @@ mod test {
 
     type SignatureType = NopSignature;
     type SignatureCollectionType = MockSignatures<SignatureType>;
+    type StateBackendType = NopStateBackend;
 
     const RESERVE_BALANCE: u128 = 1_000_000_000_000_000_000;
     const EXEC_DELAY: SeqNum = SeqNum(3);
     const S1: B256 = B256::new(hex!(
         "0ed2e19e3aca1a321349f295837988e9c6f95d4a6fc54cfab6befd5ee82662ad"
     ));
+    const ONE_ETHER: u128 = 1_000_000_000_000_000_000;
+    const HALF_ETHER: u128 = 500_000_000_000_000_000;
 
     fn sign_tx(signature_hash: &FixedBytes<32>) -> PrimitiveSignature {
         let secret_key = B256::repeat_byte(0xAu8).to_string();
@@ -1093,14 +1093,90 @@ mod test {
         signer.sign_hash_sync(signature_hash).unwrap()
     }
 
-    fn make_test_tx(value: u64, nonce: u64, signer: FixedBytes<32>) -> Recovered<TxEnvelope> {
-        recover_tx(make_legacy_tx(
+    fn make_test_tx(gas_limit: u64, value: u128, nonce: u64, signer: FixedBytes<32>) -> Recovered<TxEnvelope> {
+        recover_tx(make_eip1559_tx_with_value(
             signer,
-            BASE_FEE_PER_GAS as u128,
             value,
+            BASE_FEE_PER_GAS as u128,
+            0, // priority fee
+            gas_limit,
             nonce,
-            0,
+            0, // input length
         ))
+    }
+
+    fn make_test_block(round: Round, seq_num: SeqNum, txs: Vec<Recovered<TxEnvelope>>) -> EthValidatedBlock<NopSignature, MockSignatures<NopSignature>> {
+        let consensus_test_block = generate_consensus_test_block(round, seq_num, txs);
+        EthValidatedBlock {
+            block: consensus_test_block.block,
+            system_txns: Vec::new(),
+            validated_txns: consensus_test_block.validated_txns,
+            nonces: consensus_test_block.nonces,
+            txn_fees: consensus_test_block.txn_fees,
+        }
+    }
+
+    fn test_coherency(
+        block_policy: EthBlockPolicy<SignatureType, SignatureCollectionType>,
+        incoming_block: EthValidatedBlock<SignatureType, SignatureCollectionType>,
+        extending_blocks: Vec<&EthValidatedBlock<SignatureType, SignatureCollectionType>>,
+        state_backend: &impl StateBackend<SignatureType, SignatureCollectionType>,
+        addresses: Vec<Address>,
+    ) -> Result<(), BlockPolicyError> {
+        let mut account_balances = block_policy.compute_account_base_balances(
+            incoming_block.get_seq_num(),
+            state_backend,
+            Some(&extending_blocks),
+            addresses.iter(),
+        )?;
+
+        println!("Account balances: {:?}", account_balances);
+
+        let mut validator =
+            EthBlockPolicyBlockValidator::new(incoming_block.get_seq_num(), block_policy.execution_delay)?;
+
+        for txn in incoming_block.validated_txns.iter() {
+            let eth_address = txn.signer();
+            let txn_nonce = txn.nonce();
+
+            validator.try_add_transaction(&mut account_balances, txn)?;
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_check_reserve_balance_coherency() {
+        let mut block_policy = EthBlockPolicy::<SignatureType, SignatureCollectionType>::new(
+            SeqNum(17),
+            EXEC_DELAY.0,
+            1337,
+            RESERVE_BALANCE,
+        );
+
+        let block1 = make_test_block(Round(1), SeqNum(18), vec![]); // block n-4
+        let block2 = make_test_block(Round(1), SeqNum(19), vec![]); // block n-3
+        let block3 = make_test_block(Round(1), SeqNum(20), vec![]); // block n-2
+        let block4 = make_test_block(Round(1), SeqNum(21), vec![]); // block n-1
+        let tx1 = make_test_tx(50000, HALF_ETHER, 0, S1);
+        let signer = tx1.signer();
+        let txs: Vec<Recovered<TxEnvelope>> = vec![tx1];
+        let incoming_block = make_test_block(Round(1), SeqNum(22), txs.clone()); // block n
+
+        // balance of signer at block n-3
+        let gas_cost = 50000 * BASE_FEE_PER_GAS as u128;
+        let state_backend = NopStateBackend {
+            balances: BTreeMap::from([(signer, U256::from(gas_cost))]),
+            ..Default::default()
+        };
+
+        BlockPolicy::<_, _, _, StateBackendType>::update_committed_block(&mut block_policy, &block1);
+        BlockPolicy::<_, _, _, StateBackendType>::update_committed_block(&mut block_policy, &block2);
+        BlockPolicy::<_, _, _, StateBackendType>::update_committed_block(&mut block_policy, &block3);
+        let extending_blocks = vec![&block4];
+
+        let result = test_coherency(block_policy, incoming_block, extending_blocks, &state_backend, vec![signer]);
+        assert!(result.is_ok(), "Block coherency check failed: {:?}", result);
     }
 
     #[test]
@@ -1567,7 +1643,7 @@ mod test {
         let txn_value = 1000;
         let block_seq_num = latest_seq_num + EXEC_DELAY;
 
-        let tx = make_test_tx(txn_value, 0, S1);
+        let tx = make_test_tx(50000, txn_value, 0, S1);
         let txs = vec![tx.clone()];
         let signer = tx.recover_signer().unwrap();
         let min_balance = compute_txn_max_value(&tx);
@@ -1621,7 +1697,7 @@ mod test {
         let txn_value = 1000;
         let block_seq_num = latest_seq_num + EXEC_DELAY - SeqNum(1);
 
-        let tx = make_test_tx(txn_value, 0, S1);
+        let tx = make_test_tx(50000, txn_value, 0, S1);
         let txs = vec![tx.clone()];
         let signer = tx.recover_signer().unwrap();
         let min_balance = compute_txn_max_gas_cost(&tx);
@@ -1675,7 +1751,7 @@ mod test {
         let txn_value = 1000;
         let block_seq_num = latest_seq_num + EXEC_DELAY;
 
-        let tx = make_test_tx(txn_value, 0, S1);
+        let tx = make_test_tx(50000, txn_value, 0, S1);
         let txs = vec![tx.clone()];
         let min_balance = compute_txn_max_gas_cost(&tx);
 
@@ -1711,7 +1787,7 @@ mod test {
         let txn_value = 1000;
         let block_seq_num = latest_seq_num + EXEC_DELAY;
 
-        let tx = make_test_tx(txn_value, 0, S1);
+        let tx = make_test_tx(50000, txn_value, 0, S1);
         let txs = vec![tx.clone()];
         let signer = tx.recover_signer().unwrap();
         let min_balance = compute_txn_max_value(&tx);
@@ -1766,8 +1842,8 @@ mod test {
         let txn_value = 1000;
         let block_seq_num = latest_seq_num + EXEC_DELAY;
 
-        let tx1 = make_test_tx(txn_value, 0, S1);
-        let tx2 = make_test_tx(txn_value * 2, 1, S1);
+        let tx1 = make_test_tx(50000, txn_value, 0, S1);
+        let tx2 = make_test_tx(50000, txn_value * 2, 1, S1);
         let signer = tx1.recover_signer().unwrap();
 
         let txs = vec![tx1.clone(), tx2.clone()];

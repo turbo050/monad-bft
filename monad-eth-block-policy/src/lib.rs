@@ -1145,8 +1145,11 @@ mod test {
         Ok(())
     }
 
-    #[test]
-    fn test_check_reserve_balance_coherency() {
+    fn setup_block_policy_with_txs(
+        txs: BTreeMap<u64, Vec<Recovered<TxEnvelope>>>,
+        signers: Vec<Address>,
+        state_backend: &impl StateBackend<SignatureType, SignatureCollectionType>,
+    ) -> Result<(), BlockPolicyError> {
         let mut block_policy = EthBlockPolicy::<SignatureType, SignatureCollectionType>::new(
             SeqNum(17),
             EXEC_DELAY.0,
@@ -1154,29 +1157,56 @@ mod test {
             RESERVE_BALANCE,
         );
 
-        let block1 = make_test_block(Round(1), SeqNum(18), vec![]); // block n-4
-        let block2 = make_test_block(Round(1), SeqNum(19), vec![]); // block n-3
-        let block3 = make_test_block(Round(1), SeqNum(20), vec![]); // block n-2
-        let block4 = make_test_block(Round(1), SeqNum(21), vec![]); // block n-1
+        // Build 5 sequential blocks (n-4 .. n)
+        let seq_num = 18;
+        let mut blocks = Vec::new();
+        for offset in 0..=4 {
+            let seq = seq_num + offset;
+            let txs = txs.get(&offset).cloned().unwrap_or_default();
+            let block = make_test_block(Round(1), SeqNum(seq), txs);
+            blocks.push(block);
+        }
+
+        // Commit first 3 blocks
+        for block in &blocks[0..3] {
+            BlockPolicy::<_, _, _, StateBackendType>::update_committed_block(&mut block_policy, block);
+        }
+
+        // Last two are extending + incoming
+        let extending_blocks = vec![&blocks[3]];
+        let incoming_block = blocks[4].clone();
+
+        test_coherency(block_policy, incoming_block, extending_blocks, state_backend, signers)
+    }
+
+    #[test]
+    fn test_check_reserve_balance_coherency() {
+        ///////////////////////////////////////////////////////////////////
+        /// Case1: Single emptying transaction                          ///
+        ///////////////////////////////////////////////////////////////////
+
         let tx1 = make_test_tx(50000, HALF_ETHER, 0, S1);
         let signer = tx1.signer();
-        let txs: Vec<Recovered<TxEnvelope>> = vec![tx1];
-        let incoming_block = make_test_block(Round(1), SeqNum(22), txs.clone()); // block n
+        let txs = BTreeMap::from([(4, vec![tx1])]); // tx in block n
 
         // balance of signer at block n-3
+        // minimum balance required is gas limit * gas bid
         let gas_cost = 50000 * BASE_FEE_PER_GAS as u128;
         let state_backend = NopStateBackend {
             balances: BTreeMap::from([(signer, U256::from(gas_cost))]),
             ..Default::default()
         };
 
-        BlockPolicy::<_, _, _, StateBackendType>::update_committed_block(&mut block_policy, &block1);
-        BlockPolicy::<_, _, _, StateBackendType>::update_committed_block(&mut block_policy, &block2);
-        BlockPolicy::<_, _, _, StateBackendType>::update_committed_block(&mut block_policy, &block3);
-        let extending_blocks = vec![&block4];
-
-        let result = test_coherency(block_policy, incoming_block, extending_blocks, &state_backend, vec![signer]);
+        let result = setup_block_policy_with_txs(txs.clone(), vec![signer], &state_backend);
         assert!(result.is_ok(), "Block coherency check failed: {:?}", result);
+
+        // should return error if fall below minimum balance
+        let state_backend = NopStateBackend {
+            balances: BTreeMap::from([(signer, U256::from(gas_cost - 1))]),
+            ..Default::default()
+        };
+        let result = setup_block_policy_with_txs(txs, vec![signer], &state_backend);
+        assert!(result.is_err(), "Block coherency check should have failed: {:?}", result);
     }
 
     #[test]

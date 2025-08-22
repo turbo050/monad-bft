@@ -1,0 +1,296 @@
+# monad-emoji-nft
+
+A tiny, fun **on‑chain Emoji NFT** you can deploy to any EVM chain (including Monad when RPC is available). It stores SVG art fully on‑chain, so no IPFS needed. One button mint, cheap gas, and kid‑friendly visuals.
+
+---
+
+## 📦 Repo layout
+
+```
+monad-emoji-nft/
+├─ contracts/
+│  └─ EmojiMon.sol
+├─ scripts/
+│  ├─ deploy.ts
+│  └─ mint.ts
+├─ test/
+│  └─ EmojiMon.t.ts
+├─ hardhat.config.ts
+├─ package.json
+├─ README.md
+└─ .env.example
+```
+
+---
+
+## 🚀 Quickstart
+
+1) **Install**
+```bash
+npm i -D hardhat @nomicfoundation/hardhat-toolbox ts-node typescript dotenv
+npm i @openzeppelin/contracts
+npx hardhat
+```
+Choose "Create a TypeScript project".
+
+2) **Drop these files in** (replace the generated ones below where names match).
+
+3) **Set RPC + key** in `.env` (see `.env.example`) and update `hardhat.config.ts` networks.
+
+4) **Deploy**
+```bash
+npx hardhat compile
+npx hardhat run scripts/deploy.ts --network monad
+```
+
+5) **Mint**
+```bash
+npx hardhat run scripts/mint.ts --network monad
+```
+
+---
+
+## 📄 contracts/EmojiMon.sol
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Strings.sol";
+import "@openzeppelin/contracts/utils/Base64.sol";
+
+/// @title EmojiMon – tiny on-chain emoji NFTs
+/// @notice Mints a random emoji SVG fully on-chain. Not secure randomness – just for fun.
+contract EmojiMon is ERC721, Ownable {
+    using Strings for uint256;
+
+    uint256 public nextId = 1;
+    uint256 public mintPrice = 0.0001 ether;
+
+    string[] private EMOJIS = [
+        unicode"😀", unicode"😎", unicode"🤖", unicode"👾", unicode"🦄",
+        unicode"🐲", unicode"🔥", unicode"💎", unicode"🌈", unicode"⚡"
+    ];
+
+    constructor() ERC721("EmojiMon", "EMON") Ownable(msg.sender) {}
+
+    function setMintPrice(uint256 weiAmount) external onlyOwner {
+        mintPrice = weiAmount;
+    }
+
+    function withdraw(address payable to) external onlyOwner {
+        to.transfer(address(this).balance);
+    }
+
+    function mint() external payable returns (uint256 tokenId) {
+        require(msg.value >= mintPrice, "Need more ETH for mint");
+        tokenId = nextId++;
+        _safeMint(msg.sender, tokenId);
+    }
+
+    function _pickEmoji(uint256 tokenId) internal view returns (string memory) {
+        // Pseudo-random: NOT for serious randomness.
+        uint256 seed = uint256(
+            keccak256(
+                abi.encodePacked(block.prevrandao, block.timestamp, msg.sender, tokenId)
+            )
+        );
+        return EMOJIS[seed % EMOJIS.length];
+    }
+
+    function tokenURI(uint256 tokenId) public view override returns (string memory) {
+        require(_ownerOf(tokenId) != address(0), "No token");
+        string memory emoji = _pickEmoji(tokenId);
+
+        string memory svg = string(
+            abi.encodePacked(
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 350 350">',
+                '<defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1">',
+                '<stop offset="0%" stop-color="#ffffff"/><stop offset="100%" stop-color="#e0e0ff"/>',
+                '</linearGradient></defs>',
+                '<rect width="100%" height="100%" fill="url(#g)"/>',
+                '<text x="50%" y="52%" font-size="140" text-anchor="middle" dominant-baseline="middle">',
+                emoji,
+                '</text>',
+                '<text x="50%" y="92%" font-size="18" text-anchor="middle" fill="#555">EmojiMon #',
+                tokenId.toString(),
+                '</text></svg>'
+            )
+        );
+
+        string memory json = Base64.encode(
+            bytes(
+                string(
+                    abi.encodePacked(
+                        '{',
+                            '"name":"EmojiMon #', tokenId.toString(), '",',
+                            '"description":"Tiny on-chain emoji NFTs for Monad/EVM.",',
+                            '"image":"data:image/svg+xml;base64,', Base64.encode(bytes(svg)), '"',
+                        '}'
+                    )
+                )
+            )
+        );
+
+        return string(abi.encodePacked("data:application/json;base64,", json));
+    }
+}
+```
+
+---
+
+## 🧪 test/EmojiMon.t.ts
+```ts
+import { expect } from "chai";
+import { ethers } from "hardhat";
+
+describe("EmojiMon", function () {
+  it("mints and returns tokenURI", async () => {
+    const [owner, user] = await ethers.getSigners();
+    const Factory = await ethers.getContractFactory("EmojiMon");
+    const emon = await Factory.deploy();
+    await emon.waitForDeployment();
+
+    const price = await emon.mintPrice();
+    const tx = await emon.connect(user).mint({ value: price });
+    await tx.wait();
+
+    const uri = await emon.tokenURI(1);
+    expect(uri).to.contain("data:application/json;base64,");
+  });
+});
+```
+
+---
+
+## 🛠 scripts/deploy.ts
+```ts
+import { ethers } from "hardhat";
+
+async function main() {
+  const Factory = await ethers.getContractFactory("EmojiMon");
+  const emon = await Factory.deploy();
+  await emon.waitForDeployment();
+  console.log("EmojiMon deployed:", await emon.getAddress());
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });
+```
+
+---
+
+## 🛠 scripts/mint.ts
+```ts
+import { ethers } from "hardhat";
+
+async function main() {
+  const addr = process.env.CONTRACT_ADDRESS!;
+  const mintPrice = process.env.MINT_PRICE_WEI || "100000000000000"; // 0.0001 ETH
+
+  const emon = await ethers.getContractAt("EmojiMon", addr);
+  const tx = await emon.mint({ value: mintPrice });
+  const receipt = await tx.wait();
+  console.log("Minted! hash:", receipt?.hash);
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });
+```
+
+---
+
+## ⚙️ hardhat.config.ts
+```ts
+import { HardhatUserConfig } from "hardhat/config";
+import "@nomicfoundation/hardhat-toolbox";
+import * as dotenv from "dotenv";
+dotenv.config();
+
+const config: HardhatUserConfig = {
+  solidity: {
+    version: "0.8.24",
+    settings: { optimizer: { enabled: true, runs: 200 } },
+  },
+  networks: {
+    // Replace with actual Monad RPC & chainId when available
+    monad: {
+      url: process.env.MONAD_RPC || "https://YOUR_MONAD_RPC",
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      chainId: Number(process.env.MONAD_CHAIN_ID || 0),
+    },
+    // For local testing
+    hardhat: {}
+  }
+};
+
+export default config;
+```
+
+---
+
+## 📦 package.json
+```json
+{
+  "name": "monad-emoji-nft",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:monad": "hardhat run scripts/deploy.ts --network monad",
+    "mint:monad": "hardhat run scripts/mint.ts --network monad"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "dotenv": "^16.4.5",
+    "hardhat": "^2.22.7",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.2"
+  }
+}
+```
+
+---
+
+## 🔐 .env.example
+```
+PRIVATE_KEY=0xabc123...
+MONAD_RPC=https://your-monad-rpc
+MONAD_CHAIN_ID=20143 # <-- put the actual chainId here when known
+CONTRACT_ADDRESS=0xYourDeployedEmojiMon
+MINT_PRICE_WEI=100000000000000
+```
+
+---
+
+## 📝 README.md (copy into repo root)
+```md
+# EmojiMon (on‑chain Emoji NFT)
+
+Fun, gas‑light ERC‑721 with fully on‑chain SVGs. Deployable to any EVM, including Monad.
+
+## Deploy
+1. `cp .env.example .env` and fill values.
+2. `npm i`
+3. `npm run build`
+4. `npm run deploy:monad`
+
+## Mint
+- `npm run mint:monad`
+- View `tokenURI(1)` in a block explorer or script; paste the base64 JSON `image` value in a browser.
+
+## Notes
+- Uses pseudo‑randomness via `block.prevrandao`. Do **not** use for lotteries.
+- All art is on‑chain; no IPFS dependency.
+```
+
+---
+
+## ✅ Why this is perfect to fork for Monad
+- **EVM compatible**: vanilla Solidity + OpenZeppelin.
+- **Self‑contained art**: no infra headaches.
+- **Starter patterns**: deploy + mint scripts, tests, env, Hardhat.
+- **Easy to re‑skin**: swap emojis for your brand (e.g., LuckyDroop icons).

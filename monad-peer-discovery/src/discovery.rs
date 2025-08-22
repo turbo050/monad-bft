@@ -1173,11 +1173,12 @@ where
             self.current_epoch = epoch;
 
             // if a full node gets promoted to a validator, advertise name records to all validators in the current and next epoch
+            // default to ValidatorPublisher
             if (self.self_role == PeerDiscoveryRole::FullNodeNone
                 || self.self_role == PeerDiscoveryRole::FullNodeClient)
                 && self.check_validator_membership(&self.self_id)
             {
-                self.self_role = PeerDiscoveryRole::ValidatorNone;
+                self.self_role = PeerDiscoveryRole::ValidatorPublisher;
 
                 let current_validators = self.epoch_validators.get(&epoch);
                 let next_validators = self.epoch_validators.get(&(epoch + Epoch(1)));
@@ -1195,11 +1196,17 @@ where
                 }
             }
 
+            // when a validator is demoted to a full node, defaults to FullNodeClient
             if (self.self_role == PeerDiscoveryRole::ValidatorNone
                 || self.self_role == PeerDiscoveryRole::ValidatorPublisher)
                 && !self.check_validator_membership(&self.self_id)
             {
-                self.self_role = PeerDiscoveryRole::FullNodeNone;
+                self.self_role = PeerDiscoveryRole::FullNodeClient;
+                // clear connection info
+                self.participation_info.iter_mut().for_each(|(_, info)| {
+                    info.status = SecondaryRaptorcastConnectionStatus::None;
+                });
+                self.look_for_upstream_validators();
             }
         }
 
